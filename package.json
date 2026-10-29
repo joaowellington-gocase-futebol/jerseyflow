@@ -1,0 +1,21 @@
+{
+  "name": "jerseyflow",
+  "version": "1.0.0",
+  "description": "JerseyFlow — uniformes em artes de case Gocase (versão local + app GoDeploy em deploy/)",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node --env-file=.env server.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^5.2.1",
+    "jszip": "^3.10.2",
+    "multer": "^2.4.0",
+    "potrace": "^2.1.8",
+    "sharp": "^0.35.5"
+  },
+  "private": true
+}

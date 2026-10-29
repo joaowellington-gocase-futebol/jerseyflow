@@ -1,0 +1,15 @@
+# segredos
+.env
+
+# dependências e saídas locais
+node_modules/
+output/
+data/dev-godeploy.sqlite
+data/logo.png
+
+# imagens de teste (não sobem no deploy)
+deploy/_teste/
+
+# ferramentas
+.claude/
+.DS_Store

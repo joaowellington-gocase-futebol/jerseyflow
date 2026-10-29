@@ -1,0 +1,6 @@
+{
+  "name": "conversor-uniformes-gocase",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js"
+}
