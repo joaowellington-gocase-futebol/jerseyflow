@@ -71,7 +71,7 @@ Liga o JerseyFlow ao app **Radar de Uniformes** (`radar-uniformes`, appId `a9e4a
 
 1. **Todo dia às 10h UTC (07h de Fortaleza)**, uma hora depois da varredura do radar, o cron chama `POST /tasks/radar`.
 2. O JerseyFlow pede ao radar os kits **LANÇADO** e **EM_CAMPO** de clubes licenciados (`GET /api/kits`). Vazamento não entra: o licenciador aprova sobre a arte oficial.
-3. Para cada kit novo dos últimos 45 dias (até 8 por rodada), abre as matérias (Footy Headlines primeiro; o link do Google Notícias não abre do servidor) e baixa as fotos da própria matéria em resolução original.
+3. Para cada kit novo dos últimos 45 dias (até 8 por rodada), abre as matérias diretas (Footy Headlines e Mantos do Futebol primeiro) e baixa as fotos da própria matéria em resolução original. Os links do Google Notícias são decodificados para a matéria original quando o Google deixa; hoje ele bloqueia o servidor do GoDeploy (HTTP 503/429), e o JerseyFlow desiste deles no primeiro bloqueio da rodada. Kit que fica sem nenhuma foto é tentado de novo na rodada seguinte.
 4. A IA (`gpt-6-astra`) separa cada foto em frente / costas / escudo / detalhe / outra, com nota de nitidez. As melhores já vêm marcadas como referência.
 5. Na aba, o designer confere ou troca o papel de cada foto, adiciona fotos se precisar, escolhe os modelos e clica em **Gerar set**. As conversões rodam no navegador, como qualquer outra (aba aberta).
 
@@ -362,6 +362,8 @@ Tudo que a IA "sabe" sobre o padrão Gocase está em **`deploy/prompts.js`**:
 - A conversão roda na aba de quem iniciou. Fechar a aba no meio interrompe (fica marcada como "Interrompida", mas dá para escolher versões das etapas que terminaram).
 - O link público das imagens do AI Proxy expira em ~48h. O app não depende dele: guarda tudo no banco.
 - As fotos de notícia variam: muitas são de jogador vestindo a camisa ou montagens. Confira os papéis antes de gerar; o Footy Headlines costuma ter fotos de produto boas.
+- Kit cujo radar só tem links do Google Notícias chega sem fotos (o Google bloqueia o servidor). Ele aparece na aba mesmo assim, e você pode adicionar as fotos à mão. Se o radar guardar o link original da matéria, esses kits passam a vir com fotos.
+- Às vezes o radar associa ao kit uma matéria de outra camisa (ex.: a camisa "Energy" no lugar da titular). A IA marca essas fotos como "outra" e o kit fica sem papéis definidos para você conferir.
 - Grafismos tonais de baixo contraste (ex.: Palmeiras III) são os mais difíceis de reproduzir no fundo. Use "Gerar outra versão" e escolha a melhor.
 
 ## 9. Próximos passos sugeridos

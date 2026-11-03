@@ -32,7 +32,7 @@ export async function estadoRadar(env) {
 }
 
 // ---------- fotos das matérias ----------
-const RUIM = /logo|icon|avatar|sprite|banner|badge|emoji|gravatar|placeholder|blank|pixel|ads?[_/-]|\/ads\/|share|facebook|twitter|whatsapp|\.svg|\.gif/i;
+const RUIM = /logo|icon|avatar|sprite|banner|badge|emoji|gravatar|placeholder|blank|pixel|[/_.-]ads?[_/-]|share|facebook|twitter|whatsapp|\.svg|\.gif/i;
 const decodificar = (s) => s.replace(/&amp;/g, '&').replace(/&#0?38;/g, '&').replace(/&quot;/g, '"').trim();
 
 /** Pede a maior versão das imagens do Blogger (Footy Headlines) e do WordPress. */
@@ -83,12 +83,61 @@ async function baixar(url, opcoes = {}) {
   return r;
 }
 
-async function fotosDoKit(kit) {
-  // matérias diretas primeiro (o link do Google Notícias é um redirecionamento em JS e não abre daqui)
-  const links = (kit.links || []).filter((l) => l?.link && !/news\.google\./.test(l.link));
-  links.sort((a, b) => (/footyheadlines/.test(b.link) - /footyheadlines/.test(a.link)) || ((b.estagio === 'LANCADO') - (a.estagio === 'LANCADO')));
+// O link do Google Notícias é um redirecionamento em JS; o endereço real sai do mesmo endpoint que a página dele usa.
+let googleBloqueado = false;
+export async function linkReal(url) {
+  if (!/news\.google\./.test(url)) return url;
+  if (googleBloqueado) throw new Error('Google Notícias bloqueou esta rodada');
+  const id = new URL(url).pathname.split('/').pop();
+  let html = '';
+  for (const pagina of [`https://news.google.com/rss/articles/${id}`, `https://news.google.com/articles/${id}?hl=pt-BR&gl=BR&ceid=BR:pt-419`]) {
+    const r = await fetch(pagina, { headers: { 'User-Agent': UA, Accept: 'text/html', 'Accept-Language': 'pt-BR,pt;q=0.9', Cookie: 'CONSENT=YES+' }, signal: AbortSignal.timeout(10000) });
+    if (r.ok) { html = await r.text(); break; }
+    if (r.status === 429 || r.status === 503) { googleBloqueado = true; throw new Error(`Google Notícias bloqueou (HTTP ${r.status})`); }
+  }
+  const sg = html.match(/data-n-a-sg="([^"]+)"/)?.[1];
+  const ts = html.match(/data-n-a-ts="([^"]+)"/)?.[1];
+  if (!sg || !ts) throw new Error('Google Notícias sem assinatura');
+  const pedido = JSON.stringify(['garturlreq', [['X', 'X', ['X', 'X'], null, null, 1, 1, 'US:en', null, 1, null, null, null, null, null, 0, 1], 'X', 'X', 1, [1, 1, 1], 1, 1, null, 0, 0, null, 0], id, Number(ts), sg]);
+  const r = await fetch('https://news.google.com/_/DotsSplashUi/data/batchexecute', {
+    method: 'POST',
+    headers: { 'User-Agent': UA, 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+    body: 'f.req=' + encodeURIComponent(JSON.stringify([[['Fbv4je', pedido, null, 'generic']]])),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!r.ok) throw new Error(`Google Notícias HTTP ${r.status}`);
+  const real = JSON.parse(JSON.parse((await r.text()).split('\n\n')[1])[0][2])[1];
+  if (!/^https?:\/\//.test(real)) throw new Error('Google Notícias não devolveu o link');
+  return real;
+}
+
+const SEM_FOTO_UTIL = /(youtube\.com|youtu\.be|instagram\.com|tiktok\.com|facebook\.com|twitter\.com|\/\/x\.com)/;
+const peso = (l) => (/footyheadlines/.test(l.link + l.fonte) ? 4 : 0) + (/mantosdofutebol/.test(l.link + l.fonte) ? 2 : 0) + (l.estagio === 'LANCADO' ? 1 : 0);
+
+async function materiasDoKit(kit) {
+  // diretas primeiro; as do Google Notícias são decodificadas até completar 4 matérias
+  const todos = (kit.links || []).filter((l) => l?.link).sort((a, b) => (/news\.google\./.test(a.link) - /news\.google\./.test(b.link)) || (peso(b) - peso(a)));
+  const abertas = [];
+  const vistas = new Set();
+  let decodificadas = 0;
+  for (const l of todos) {
+    if (abertas.length >= 4) break;
+    let link = l.link;
+    if (/news\.google\./.test(link)) {
+      if (decodificadas++ >= 8) continue;
+      if (googleBloqueado) continue;
+      try { link = await linkReal(link); } catch (e) { console.log('radar: link do Google Notícias não abriu:', e.message); continue; }
+    }
+    if (SEM_FOTO_UTIL.test(link) || vistas.has(link)) continue;
+    vistas.add(link);
+    abertas.push({ ...l, link });
+  }
+  return abertas;
+}
+
+async function fotosDoKit(kit, materias) {
   const candidatas = [];
-  for (const l of links.slice(0, 4)) {
+  for (const l of materias) {
     try {
       const html = await (await baixar(l.link, { accept: 'text/html' })).text();
       for (const img of imagensDaPagina(html, l.link).slice(0, 8)) candidatas.push({ ...img, origem: l.link, fonte: l.fonte || new URL(l.link).hostname });
@@ -193,12 +242,18 @@ export async function sincronizarRadar(env, salvarBlob, { dias = JANELA_DIAS, or
     const desde = new Date(Date.now() - dias * 86400000).toISOString().slice(0, 10);
     const kits = (await kitsDoRadar(env)).filter((k) => (k.lancado_em || k.mudou_em || '') >= desde);
     resumo.vistos = kits.length;
-    const ja = new Set((await db.query(`SELECT id FROM radar_kits`, [])).rows.map((r) => r.id));
+    googleBloqueado = false;
+    // kit que ficou sem nenhuma foto volta a ser tentado (o radar pode ter achado matérias novas)
+    const ja = new Map((await db.query(`SELECT id, status, recebido_em, json FROM radar_kits`, [])).rows.map((r) => [r.id, r]));
     const novos = kits.filter((k) => !ja.has(idDoKit(k.kit_id)));
-    resumo.pendentes = Math.max(0, novos.length - KITS_POR_RODADA);
-    for (const kit of novos.slice(0, KITS_POR_RODADA)) {
+    const semNada = (r) => r?.status === 'sem_fotos' && !(JSON.parse(r.json).imagens || []).length;
+    const retentar = kits.filter((k) => semNada(ja.get(idDoKit(k.kit_id))));
+    const fila = [...novos, ...retentar];
+    resumo.pendentes = Math.max(0, fila.length - KITS_POR_RODADA);
+    for (const kit of fila.slice(0, KITS_POR_RODADA)) {
       const id = idDoKit(kit.kit_id);
-      const fotos = await fotosDoKit(kit);
+      const materias = await materiasDoKit(kit);
+      const fotos = await fotosDoKit(kit, materias);
       const ia = await classificar(env, kit, fotos);
       const imagens = [];
       for (const [i, f] of fotos.entries()) {
@@ -210,13 +265,15 @@ export async function sincronizarRadar(env, salvarBlob, { dias = JANELA_DIAS, or
       escolherPapeis(imagens);
       const status = imagens.some((im) => im.papel) ? 'novo' : 'sem_fotos';
       const agora = new Date().toISOString();
+      const recebidoEm = ja.get(id)?.recebido_em || agora;
       const estado = {
-        id, kitId: kit.kit_id, nome: nomeDoKit(kit), status, recebidoEm: agora, atualizadoEm: agora,
-        kit: { clube: kit.clube_nome, tipo: kit.tipo, temporada: kit.temporada, fornecedor: kit.fornecedor, estagio: kit.estagio, lancadoEm: kit.lancado_em, veredito: kit.veredito, rota: kit.rota, janela: kit.janela, score: kit.score, links: (kit.links || []).slice(0, 6) },
+        id, kitId: kit.kit_id, nome: nomeDoKit(kit), status, recebidoEm, atualizadoEm: agora,
+        kit: { clube: kit.clube_nome, tipo: kit.tipo, temporada: kit.temporada, fornecedor: kit.fornecedor, estagio: kit.estagio, lancadoEm: kit.lancado_em, veredito: kit.veredito, rota: kit.rota, janela: kit.janela, score: kit.score, links: (materias.length ? materias : kit.links || []).slice(0, 6) },
         imagens, tarefas: [], classificadoPorIA: Boolean(ia),
       };
       await db.exec(`INSERT OR REPLACE INTO radar_kits (id, kit_id, nome, status, recebido_em, atualizado_em, json) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [id, kit.kit_id, estado.nome, status, agora, agora, JSON.stringify(estado)]);
+        [id, kit.kit_id, estado.nome, status, recebidoEm, agora, JSON.stringify(estado)]);
+      console.log('radar kit', id, `${materias.length} matérias, ${fotos.length} fotos`, status);
       if (status === 'novo') resumo.novos++; else resumo.semFotos++;
     }
     resumo.ok = true;
