@@ -18,7 +18,15 @@ const DB = {
     return { rowsWritten: r.changes };
   },
 };
-const env = { DB, AI_PROXY_KEY: process.env.AI_PROXY_KEY };
+// radar de mentira para testar a aba "Novos uniformes" (matérias reais do Footy Headlines)
+const env = { DB, AI_PROXY_KEY: process.env.AI_PROXY_KEY, RADAR_URL: 'http://localhost:4322/_radar', RADAR_API_KEY: 'dev' };
+const hojeMenos = (d) => new Date(Date.now() - d * 86400000).toISOString().slice(0, 10);
+const RADAR_FAKE = [
+  { kit_id: 'botafogo|26-27|OUTRO', clube_nome: 'Botafogo', tipo: 'OUTRO', temporada: '26-27', fornecedor: 'Reebok', estagio: 'LANCADO', licenciado: 1, lancado_em: hojeMenos(3), mudou_em: hojeMenos(3), veredito: 'GO', score: 72,
+    links: [{ titulo: 'Botafogo 26-27 Fourth Pink October Kit Released', link: 'https://www.footyheadlines.com/8545743502/botafogo-26-27-fourth-pink-october-kit-released.html', fonte: 'footyheadlines.com', estagio: 'LANCADO' }] },
+  { kit_id: 'atletico-mg|26-27|TERCEIRA', clube_nome: 'Atlético Mineiro', tipo: 'TERCEIRA', temporada: '26-27', fornecedor: 'Nike', estagio: 'LANCADO', licenciado: 1, lancado_em: hojeMenos(10), mudou_em: hojeMenos(10), veredito: 'GO', score: 80,
+    links: [{ titulo: 'Nike Atlético Mineiro 26-27 Manto da Massa Kit Revealed', link: 'https://www.footyheadlines.com/4617508466/nike-atletico-mineiro-26-27-manto-da-massa-kit-revealed.html', fonte: 'footyheadlines.com', estagio: 'LANCADO' }] },
+];
 const TIPOS = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml' };
 
 http.createServer(async (req, res) => {
@@ -30,6 +38,10 @@ http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': TIPOS[path.extname(p)] || 'application/octet-stream' });
       return fs.createReadStream(p).pipe(res);
     }
+  }
+  if (url.pathname === '/_radar/api/kits') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify(RADAR_FAKE.filter((k) => k.estagio === url.searchParams.get('estagio'))));
   }
   const chunks = [];
   for await (const c of req) chunks.push(c);

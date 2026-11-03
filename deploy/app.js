@@ -38,6 +38,7 @@ function pararAcompanhamento() { clearInterval(poll); desligar?.(); desligar = n
 $$('.nav button').forEach((b) => b.onclick = () => {
   pararAcompanhamento(); atual = null; history.replaceState(null, '', location.pathname);
   if (b.dataset.v === 'hist') historico();
+  else if (b.dataset.v === 'radar') novos();
   else if (b.dataset.v === 'escudo') { ver('escudo'); Esc.mostrar(); }
   else ver('nova');
 });
@@ -488,6 +489,127 @@ function ligar() {
   });
 }
 
+// ---------- novos uniformes (vindos do Radar de Uniformes) ----------
+const PAPEIS = [['frente', 'Frente'], ['escudo', 'Escudo'], ['costas', 'Costas'], ['', 'Não usar']];
+const LIMITE = { frente: 3, escudo: 2, costas: 2 };
+let kitsRadar = [], filtroRadar = 'novo';
+const modelosKit = new Map(); // modelos marcados em cada card (padrão: frente + escudo, e costas quando há foto de costas)
+const blobUrl = (chave) => `/api/blob/${encodeURIComponent(chave)}`;
+const dataBR = (d) => (d ? new Date(d.length === 10 ? d + 'T12:00:00' : d).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '');
+async function salvarKit(k) {
+  k.atualizadoEm = new Date().toISOString();
+  await fetch(`/api/radar/kits/${k.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(k) });
+  contarNovos();
+}
+function contarNovos() {
+  const n = kitsRadar.filter((k) => k.status === 'novo').length;
+  const el = $('#radarCnt'); el.textContent = n; el.hidden = !n;
+}
+async function carregarRadar() {
+  kitsRadar = await fetch('/api/radar/kits').then((r) => r.json()).catch(() => []);
+  contarNovos();
+}
+async function novos() {
+  ver('radar');
+  $('#radarLista').innerHTML = '<div class="empty"><span class="spin"></span></div>';
+  const [estado] = await Promise.all([fetch('/api/radar/estado').then((r) => r.json()).catch(() => ({})), carregarRadar()]);
+  const u = estado.ultima;
+  $('#radarInfo').innerHTML = !estado.temChave
+    ? '<span style="color:var(--warn)">Falta conectar: a chave de API do Radar ainda não foi configurada neste app.</span>'
+    : u ? `Última busca ${new Date(u.quando).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })} · ${u.ok ? `${u.novos} novo(s)${u.semFotos ? `, ${u.semFotos} sem foto` : ''}${u.pendentes ? ` · ${u.pendentes} ficam para a próxima` : ''}` : `<span style="color:var(--bad)">${esc(u.erro)}</span>`}`
+      : 'Ainda não buscou no radar. A busca automática roda todo dia às 07h.';
+  renderRadar();
+}
+function renderRadar() {
+  $$('#segRadar button').forEach((b) => b.classList.toggle('on', b.dataset.f === filtroRadar));
+  const lista = kitsRadar.filter((k) => (filtroRadar === 'novo' ? ['novo', 'sem_fotos'].includes(k.status) : k.status === filtroRadar));
+  $('#radarLista').innerHTML = lista.length ? lista.map(cardKit).join('') : `<div class="empty">${filtroRadar === 'novo' ? 'Nenhum uniforme novo esperando. Quando o radar achar um lançamento, ele aparece aqui.' : 'Nada por aqui.'}</div>`;
+  ligarRadar();
+}
+function modelosDe(k) {
+  if (!modelosKit.has(k.id)) modelosKit.set(k.id, new Set(['frente', 'escudo', ...(k.imagens.some((im) => im.papel === 'costas') ? ['costas'] : [])]));
+  return modelosKit.get(k.id);
+}
+function cardKit(k) {
+  const kit = k.kit || {};
+  const sel = modelosDe(k);
+  const usadas = k.imagens.filter((im) => im.papel);
+  const fontes = [...new Map((kit.links || []).map((l) => [l.link, l])).values()].slice(0, 3);
+  return `<div class="rk panel" data-k="${k.id}">
+    <div class="rk-h"><div><b>${esc(k.nome)}</b>
+      <small>${[kit.lancadoEm && `lançado em ${dataBR(kit.lancadoEm)}`, kit.fornecedor, kit.veredito && `veredito ${kit.veredito}`].filter(Boolean).map(esc).join(' · ')}</small>
+      <div class="rk-src">${fontes.map((l) => `<a href="${esc(l.link)}" target="_blank" rel="noopener">${esc(l.fonte || 'matéria')}</a>`).join('')}</div></div>
+      ${k.status === 'gerado' ? badge('concluido', 'Set gerado') : k.status === 'descartado' ? badge('aguardando', 'Descartado') : k.status === 'sem_fotos' ? badge('ressalvas', 'Sem foto boa') : badge('rodando', 'Novo').replace(/<span class="spin"[^>]*><\/span>/, '')}</div>
+    <div class="rk-fotos">${k.imagens.map((im, i) => `<figure class="rf ${im.papel ? 'on' : ''}">
+        <a href="${blobUrl(im.chave)}" target="_blank"><img src="${blobUrl(im.chave)}" loading="lazy"></a>
+        <select data-im="${i}">${PAPEIS.map(([v, n]) => `<option value="${v}" ${im.papel === v ? 'selected' : ''}>${n}</option>`).join('')}</select>
+        ${im.motivo || im.papelIA ? `<small title="${esc(im.motivo)}">IA: ${esc(im.papelIA || '—')}${im.nitida != null ? ` · ${im.nitida}/10` : ''}</small>` : im.manual ? '<small>enviada por você</small>' : ''}</figure>`).join('')}
+      <label class="rf add" title="Adicionar foto">+<input type="file" accept="image/*" multiple hidden data-add></label></div>
+    ${k.status === 'gerado' ? `<div class="rk-tar">${(k.tarefas || []).map((t) => `<a href="#${t.id}" data-abrir="${t.id}">${esc(t.nome)} →</a>`).join('')}</div>` : ''}
+    <div class="rk-a">
+      <div class="rk-mods">${MODELOS_UI.map((m) => `<button class="chipbtn ${sel.has(m.id) ? 'on' : ''}" data-mod="${m.id}">${sel.has(m.id) ? '✓ ' : ''}${m.nome}</button>`).join('')}</div>
+      <span class="rk-n">${usadas.length ? `${usadas.length} foto(s) como referência` : 'escolha ao menos a foto da frente'}</span>
+      ${k.status !== 'descartado' ? `<button class="link" data-descartar>Descartar</button>` : `<button class="link" data-voltar>Voltar para novos</button>`}
+      <button class="btn grad" data-gerar ${usadas.some((im) => im.papel === 'frente') && sel.size ? '' : 'disabled'}>${k.status === 'gerado' ? 'Gerar de novo' : `Gerar set (${sel.size})`} →</button>
+    </div></div>`;
+}
+function ligarRadar() {
+  $$('.rk').forEach((card) => {
+    const k = kitsRadar.find((x) => x.id === card.dataset.k);
+    $$('select[data-im]', card).forEach((s) => s.onchange = () => {
+      const im = k.imagens[+s.dataset.im], papel = s.value;
+      if (papel && k.imagens.filter((x) => x !== im && x.papel === papel).length >= LIMITE[papel]) { toast(`Máximo de ${LIMITE[papel]} fotos em ${PAPEIS.find((p) => p[0] === papel)[1]}`); s.value = im.papel; return; }
+      im.papel = papel;
+      if (k.status === 'sem_fotos' && papel) k.status = 'novo';
+      salvarKit(k); renderRadar();
+    });
+    $('[data-add]', card).onchange = async (e) => {
+      toast('Enviando foto…');
+      for (const f of e.target.files) {
+        const chave = `r:${k.id}:u${Date.now().toString(36)}`;
+        await enviarBlob(chave, await reduzir(f, 2048));
+        k.imagens.push({ chave, manual: true, papel: k.imagens.some((im) => im.papel === 'frente') ? '' : 'frente' });
+      }
+      if (k.status === 'sem_fotos') k.status = 'novo';
+      await salvarKit(k); renderRadar();
+    };
+    $$('[data-mod]', card).forEach((b) => b.onclick = () => { const s = modelosDe(k); s.has(b.dataset.mod) ? s.delete(b.dataset.mod) : s.add(b.dataset.mod); renderRadar(); });
+    const st = (status) => async () => { k.status = status; await salvarKit(k); renderRadar(); };
+    $('[data-descartar]', card)?.addEventListener('click', st('descartado'));
+    $('[data-voltar]', card)?.addEventListener('click', st('novo'));
+    $$('[data-abrir]', card).forEach((a) => a.onclick = (e) => { e.preventDefault(); abrir(a.dataset.abrir); });
+    $('[data-gerar]', card).onclick = () => gerarSet(k);
+  });
+}
+async function gerarSet(k) {
+  const usadas = k.imagens.filter((im) => im.papel);
+  if (!usadas.some((im) => im.papel === 'frente')) return toast('Escolha ao menos a foto da frente');
+  toast('Preparando as referências…');
+  const referencias = await Promise.all(usadas.map(async (im) => ({ papel: im.papel, file: await (await fetch(blobUrl(im.chave))).blob() })));
+  const kit = k.kit || {};
+  const notas = `As fotos vêm de matérias sobre o lançamento oficial (${k.nome}${kit.fornecedor ? `, ${kit.fornecedor}` : ''}): ignore textos, marcas d'água, pessoas, vitrines e fundos.`;
+  const iniciadas = [];
+  for (const modelo of MODELOS_UI.map((m) => m.id).filter((m) => modelosDe(k).has(m))) {
+    const op = { ...opcoes, modelo, ...(modelo === 'costas' ? { nomeNumero: false } : {}) };
+    const { tarefa, executar } = await M.iniciar({ referencias, estilosUrls: urlsEstilo(modelo), notas, opcoes: op, usuario });
+    executar.then(() => toast(tarefa.estado.status === 'concluido' ? `Pronto: ${tarefa.estado.nome}` : `${tarefa.estado.nome || 'Uma conversão'} parou com erro`));
+    iniciadas.push({ id: tarefa.id, nome: `${MODELOS_UI.find((m) => m.id === modelo).nome}`, modelo });
+  }
+  k.status = 'gerado';
+  k.tarefas = [...iniciadas, ...(k.tarefas || [])].slice(0, 9);
+  await salvarKit(k);
+  toast(`${iniciadas.length} conversões rodando — deixe esta aba aberta`);
+  abrir(iniciadas[0].id);
+}
+$$('#segRadar button').forEach((b) => b.onclick = () => { filtroRadar = b.dataset.f; renderRadar(); });
+$('#btnRadar').onclick = async () => {
+  const b = $('#btnRadar'); b.disabled = true; b.textContent = 'Buscando no radar…';
+  const r = await fetch('/api/radar/sincronizar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then((x) => x.json()).catch((e) => ({ ok: false, erro: e.message }));
+  b.disabled = false; b.textContent = 'Buscar no radar agora';
+  toast(r.ok ? (r.novos || r.semFotos ? `${r.novos + r.semFotos} uniforme(s) novo(s)` : 'Nenhum lançamento novo no radar') : `Não deu certo: ${r.erro}`);
+  novos();
+};
+
 // ---------- histórico ----------
 async function historico() {
   ver('hist');
@@ -501,7 +623,7 @@ async function historico() {
   preencherMockups();
 }
 
-renderModelos(); renderSlots(); carregarEstilos(); carregarLogo(); Esc.iniciarAba(usuario);
+renderModelos(); renderSlots(); carregarEstilos(); carregarLogo(); Esc.iniciarAba(usuario); carregarRadar();
 const porHash = () => { const id = location.hash.slice(1); if (id && atual?.id !== id) abrir(id); };
 window.addEventListener('hashchange', porHash);
 porHash();

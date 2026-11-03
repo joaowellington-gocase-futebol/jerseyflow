@@ -246,6 +246,30 @@ textarea:focus{border-color:rgba(var(--a-rgb),.5);box-shadow:0 0 0 3px rgba(var(
 .fin .link{margin-top:6px}
 .et-h .btn{padding:6px 12px;font-size:12.5px}
 .usar{width:100%;justify-content:center;margin-top:10px}
+.nav .cnt{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;margin-left:6px;border-radius:9px;background:var(--a1);color:var(--on-a);font-size:11px}
+.nav button.on .cnt{background:var(--on-a);color:var(--a1)}
+.rk-top{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:18px 0}
+.rk-top small{flex:1;color:var(--muted);font-size:12.5px;min-width:200px}
+.rk{margin-bottom:16px}
+.rk-h{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.rk-h b{font-size:17px;display:block}
+.rk-h small{color:var(--muted);font-size:12.5px}
+.rk-src{display:flex;gap:10px;margin-top:4px;flex-wrap:wrap}
+.rk-src a{color:var(--muted);font-size:12px}
+.rk-fotos{display:flex;gap:10px;overflow-x:auto;padding:14px 0 6px}
+.rf{flex:none;width:150px;margin:0;border:1px solid var(--line2);border-radius:12px;padding:6px;background:var(--bg2);opacity:.55;transition:.15s}
+.rf.on{opacity:1;border-color:rgba(var(--a-rgb),.55)}
+.rf img{width:100%;height:150px;object-fit:contain;border-radius:8px;background:#0d0f17;display:block}
+.rf select{width:100%;margin-top:6px;background:var(--panel);color:var(--ink);border:1px solid var(--line2);border-radius:8px;padding:5px;font:inherit;font-size:12px}
+.rf small{display:block;color:var(--muted);font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rf.add{display:grid;place-items:center;font-size:28px;color:var(--muted);cursor:pointer;opacity:1;min-height:190px;border-style:dashed}
+.rk-tar{display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 2px;font-size:13px;font-weight:700}
+.rk-tar a{color:var(--a1)}
+.rk-a{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px}
+.rk-mods{display:flex;gap:6px;flex-wrap:wrap}
+.chipbtn{border:1px solid var(--line2);background:var(--bg2);color:var(--muted);border-radius:999px;padding:6px 12px;font-size:12.5px;font-weight:700}
+.chipbtn.on{border-color:rgba(var(--a-rgb),.55);color:var(--ink);background:rgba(var(--a-rgb),.1)}
+.rk-n{flex:1;color:var(--muted);font-size:12.5px}
 .ajustar{margin-top:10px;border:1px dashed var(--line2);border-radius:10px;padding:8px 10px}
 .ajustar summary{cursor:pointer;font-size:12.5px;font-weight:700;color:var(--muted);list-style:none}
 .ajustar summary::-webkit-details-marker{display:none}
@@ -325,7 +349,7 @@ textarea:focus{border-color:rgba(var(--a-rgb),.5);box-shadow:0 0 0 3px rgba(var(
 <header class="top">
   <img class="logo" src="/assets/logo-topo.svg" alt="gocase">
   <div class="t">Jersey<em>Flow</em><small>referência → arte de case</small></div>
-  <nav class="nav"><button data-v="nova" class="on">Nova conversão</button><button data-v="escudo">Gerar escudo</button><button data-v="hist">Histórico</button></nav>
+  <nav class="nav"><button data-v="nova" class="on">Nova conversão</button><button data-v="escudo">Gerar escudo</button><button data-v="radar">Novos uniformes<span class="cnt" id="radarCnt" hidden></span></button><button data-v="hist">Histórico</button></nav>
   <div class="sp"></div>
   <div class="chip"><i></i><span id="chipModelos">AI Proxy</span></div>
 </header>
@@ -452,6 +476,15 @@ textarea:focus{border-color:rgba(var(--a-rgb),.5);box-shadow:0 0 0 3px rgba(var(
     <div class="sec" style="margin-top:38px">Escudos gerados</div>
     <p class="secs">Todo o time vê os escudos gerados aqui. Clique para abrir, trocar a versão ou baixar.</p>
     <div class="esc-hist" id="escHist"></div>
+  </section>
+
+  <!-- NOVOS UNIFORMES (Radar de Uniformes) -->
+  <section class="view" id="v-radar">
+    <div class="h1">Novos uniformes</div>
+    <p class="lead">Lançamentos oficiais de clubes licenciados que o Radar de Uniformes encontrou, com as fotos das matérias. Confira as fotos e gere o set com um clique.</p>
+    <div class="rk-top"><div class="seg" id="segRadar"><button data-f="novo" class="on">Novos</button><button data-f="gerado">Gerados</button><button data-f="descartado">Descartados</button></div>
+      <small id="radarInfo"></small><button class="btn" id="btnRadar">Buscar no radar agora</button></div>
+    <div id="radarLista"></div>
   </section>
 
   <!-- HISTÓRICO -->

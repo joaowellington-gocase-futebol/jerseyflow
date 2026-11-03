@@ -1,7 +1,9 @@
 // JerseyFlow (antigo Conversor de Uniformes Gocase) — worker do GoDeploy.
 // O pipeline e o processamento de imagem rodam no navegador; aqui ficam só:
 //  - a ponte com o AI Proxy (a chave fica no segredo AI_PROXY_KEY, nunca vai para o navegador)
-//  - o armazenamento compartilhado no env.DB: conversões, escudos gerados, versões de imagem, biblioteca de estilo e logo.
+//  - o armazenamento compartilhado no env.DB: conversões, escudos gerados, versões de imagem, biblioteca de estilo e logo;
+//  - a ponte com o Radar de Uniformes (src/radar.js): kits lançados chegam com as fotos para gerar o set com um clique.
+import { schemaRadar, sincronizarRadar, estadoRadar, cronValido } from './radar.js';
 
 const AI = 'https://ai-proxy.gogroupbr.com';
 const MODELOS = { analise: 'gpt-6-astra', revisor1: 'gpt-6-astra', revisor2: 'gpt-5.6-sol' };
@@ -19,6 +21,8 @@ async function schema(db) {
   try { await db.exec(`ALTER TABLE estilos ADD COLUMN modelo TEXT DEFAULT 'frente'`, []); } catch { /* coluna já existe */ }
   // aba "Gerar escudo": cada geração de escudo PNG 1000×1000
   await db.exec(`CREATE TABLE IF NOT EXISTS escudos (id TEXT PRIMARY KEY, nome TEXT, status TEXT, autor TEXT, capa TEXT, criado_em TEXT, atualizado_em TEXT, json TEXT NOT NULL)`, []);
+  // aba "Novos uniformes": kits lançados que vieram do Radar de Uniformes
+  await schemaRadar(db);
   pronto = true;
 }
 
@@ -70,8 +74,14 @@ export default {
     const p = url.pathname;
     const m = req.method;
     const usuario = req.headers.get('x-godeploy-user-email') || 'anônimo';
-    if (!p.startsWith('/api/')) return new Response('Not found', { status: 404 });
     const db = env.DB;
+    // cron diário (depois da varredura do radar): só a plataforma, com assinatura
+    if (p === '/tasks/radar' && m === 'POST') {
+      if (!(await cronValido(req, env))) return erro('só o cron da plataforma', 403);
+      await schema(db);
+      return json(await sincronizarRadar(env, salvarBlob));
+    }
+    if (!p.startsWith('/api/')) return new Response('Not found', { status: 404 });
     await schema(db);
 
     try {
@@ -105,7 +115,7 @@ export default {
           const b = await lerBlob(db, chave);
           if (!b) return new Response('não encontrado', { status: 404 });
           // versões de conversões nunca mudam de conteúdo; estilo/logo usam ?v= para quebrar cache
-          const imutavel = chave.startsWith('t:') || chave.startsWith('e:') || url.searchParams.has('v');
+          const imutavel = chave.startsWith('t:') || chave.startsWith('e:') || chave.startsWith('r:') || url.searchParams.has('v');
           return new Response(b.bytes, { headers: { 'Content-Type': b.tipo, 'Cache-Control': imutavel ? 'private, max-age=31536000, immutable' : 'no-cache' } });
         }
         if (m === 'DELETE') {
@@ -173,6 +183,25 @@ export default {
           await db.exec(`DELETE FROM blobs WHERE chave LIKE ?`, [`e:${id}:%`]);
           return json({ ok: true });
         }
+      }
+
+      // ---------- novos uniformes (Radar de Uniformes) ----------
+      if (p === '/api/radar/estado' && m === 'GET') return json(await estadoRadar(env));
+      if (p === '/api/radar/sincronizar' && m === 'POST') {
+        const b = await req.json().catch(() => ({}));
+        return json(await sincronizarRadar(env, salvarBlob, { dias: Math.min(365, Number(b.dias) || undefined) || undefined, origem: usuario }));
+      }
+      if (p === '/api/radar/kits' && m === 'GET') {
+        const r = await db.query(`SELECT json FROM radar_kits ORDER BY recebido_em DESC LIMIT 200`, []);
+        return new Response(`[${r.rows.map((x) => x.json).join(',')}]`, { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
+      }
+      const mrk = p.match(/^\/api\/radar\/kits\/([a-z0-9-]{1,60})$/);
+      if (mrk && m === 'PUT') {
+        const txt = await req.text();
+        if (txt.length > 500_000) return erro('estado grande demais', 413);
+        const k = JSON.parse(txt);
+        const r = await db.exec(`UPDATE radar_kits SET status = ?, atualizado_em = ?, json = ? WHERE id = ?`, [k.status || 'novo', new Date().toISOString(), txt, mrk[1]]);
+        return r.rowsWritten ? json({ ok: true }) : erro('kit não encontrado', 404);
       }
 
       // ---------- biblioteca de estilo ----------

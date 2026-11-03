@@ -65,6 +65,22 @@ Na tela:
 
 Código: `deploy/escudo.js`.
 
+### Aba "Novos uniformes" (Radar de Uniformes)
+
+Liga o JerseyFlow ao app **Radar de Uniformes** (`radar-uniformes`, appId `a9e4a535`), que todo dia varre vazamentos e lançamentos de camisas.
+
+1. **Todo dia às 10h UTC (07h de Fortaleza)**, uma hora depois da varredura do radar, o cron chama `POST /tasks/radar`.
+2. O JerseyFlow pede ao radar os kits **LANÇADO** e **EM_CAMPO** de clubes licenciados (`GET /api/kits`). Vazamento não entra: o licenciador aprova sobre a arte oficial.
+3. Para cada kit novo dos últimos 45 dias (até 8 por rodada), abre as matérias (Footy Headlines primeiro; o link do Google Notícias não abre do servidor) e baixa as fotos da própria matéria em resolução original.
+4. A IA (`gpt-6-astra`) separa cada foto em frente / costas / escudo / detalhe / outra, com nota de nitidez. As melhores já vêm marcadas como referência.
+5. Na aba, o designer confere ou troca o papel de cada foto, adiciona fotos se precisar, escolhe os modelos e clica em **Gerar set**. As conversões rodam no navegador, como qualquer outra (aba aberta).
+
+Também dá para buscar na hora com **Buscar no radar agora**.
+
+**Conexão entre os apps:** o radar é autenticado, então o JerseyFlow chama ele com uma **chave de API do GoDeploy** (`gdk_…`, criada no admin console, escopo app `a9e4a535`), guardada no segredo `RADAR_API_KEY`. Sem a chave, a aba mostra o aviso e nada é buscado. O radar não precisou de nenhuma mudança.
+
+Código: `deploy/src/radar.js` (servidor) e a seção "novos uniformes" de `deploy/app.js`. No simulador local, `devserver.mjs` tem um radar de mentira com duas matérias reais.
+
 ### O ZIP
 
 ```
@@ -176,12 +192,16 @@ O projeto tem **duas versões** do mesmo produto:
 | `GET /api/tarefas` · `GET/PUT /api/tarefas/:id` | histórico e estado de cada conversão (JSON) |
 | `GET/POST /api/estilo` · `DELETE /api/estilo/:id` | biblioteca de estilo, separada por modelo |
 | `GET/POST/DELETE /api/logo` | logo gocase customizado |
+| `GET /api/radar/estado` · `POST /api/radar/sincronizar` | conexão com o Radar de Uniformes e busca manual |
+| `GET /api/radar/kits` · `PUT /api/radar/kits/:id` | kits lançados vindos do radar (papéis das fotos, status, conversões geradas) |
+| `POST /tasks/radar` | cron diário (`0 10 * * *`), só com a assinatura `X-Godeploy-Cron` |
 
 **Tabelas no `env.DB`:**
 - `blobs (chave, idx, tipo, dados)`
 - `tarefas (id, nome, status, autor, capa, criado_em, atualizado_em, json)`
 - `estilos (id, nome, autor, criado_em, modelo)`
 - `escudos (id, nome, status, autor, capa, criado_em, atualizado_em, json)`
+- `radar_kits (id, kit_id, nome, status, recebido_em, atualizado_em, json)`: status `novo`, `sem_fotos`, `gerado` ou `descartado`
 - `config (chave, valor)`
 
 **Chaves de blob:**
@@ -189,6 +209,7 @@ O projeto tem **duas versões** do mesmo produto:
 - mesma chave com `_full` no final: PNG completo dessa versão;
 - `t:<id>:ref_<n>`: referências enviadas;
 - `e:<id>:ref`, `e:<id>:recorte` e `e:<id>:v<n>`: foto, recorte e versões da aba "Gerar escudo";
+- `r:<kit>:<n>` e `r:<kit>:u<n>`: fotos baixadas das matérias e fotos adicionadas à mão na aba "Novos uniformes";
 - `estilo:<id>` e `logo`.
 
 ### Segurança
@@ -196,6 +217,7 @@ O projeto tem **duas versões** do mesmo produto:
 - A chave do AI Proxy fica **só** no segredo `AI_PROXY_KEY` do GoDeploy (versão publicada) e no `.env` local (fora do git). Nunca vai para a página.
 - O app é **autenticado**: só logins Gogroup.
 - O worker aceita apenas os modelos de IA da lista permitida.
+- A chave de API do radar fica só no segredo `RADAR_API_KEY`. A rota do cron confere a assinatura da plataforma.
 
 ---
 
@@ -210,6 +232,7 @@ deploy/                     ← versão publicada no GoDeploy
   imagem.js                 canvas: normalização, chroma key, alinhamento, ampliação (pica), logo, mockup
   prompts.js                TODOS os prompts e regras (padrões por modelo, revisores, checklists)
   src/index.js              worker (API + armazenamento)
+  src/radar.js              ponte com o Radar de Uniformes (busca diária, fotos das matérias, classificação)
   assets/
     logo-gocase.svg         logo vetorizado (aplicado nas artes)
     logo-topo.svg           logo do cabeçalho do app
@@ -268,13 +291,13 @@ Pelo MCP do GoDeploy (no Claude):
      -F "assets/estilo-costas.js=@./assets/estilo-costas.js" \
      -F "assets/estilo-escudo.js=@./assets/estilo-escudo.js" \
      -F "assets/mockup-molde.js=@./assets/mockup-molde.js" \
-     -F "src/index.js=@./src/index.js" -F "package.json=@./package.json" \
+     -F "src/index.js=@./src/index.js" -F "src/radar.js=@./src/radar.js" -F "package.json=@./package.json" \
      https://mcp.devgogroup.com/upload
    ```
 3. `updateApp` com:
    - `appId: cc72034c`
    - `entrypoint: src/index.js`
-   - `assets`: todos os arquivos acima, menos `src/index.js` e `package.json`
+   - `assets`: todos os arquivos acima, menos `src/index.js`, `src/radar.js` e `package.json`
 
 **Atenção:**
 - Imagens binárias não sobem bem como asset no GoDeploy. Por isso exemplos, molde e afins vão **embutidos em base64 dentro de arquivos `.js`**.
@@ -338,6 +361,7 @@ Tudo que a IA "sabe" sobre o padrão Gocase está em **`deploy/prompts.js`**:
 - A resolução nativa da IA é de ~1,57 MP (≈ 880 × 1800). As saídas em 2000/3000 px são ampliadas com lanczos3 e nitidez, não redesenhadas.
 - A conversão roda na aba de quem iniciou. Fechar a aba no meio interrompe (fica marcada como "Interrompida", mas dá para escolher versões das etapas que terminaram).
 - O link público das imagens do AI Proxy expira em ~48h. O app não depende dele: guarda tudo no banco.
+- As fotos de notícia variam: muitas são de jogador vestindo a camisa ou montagens. Confira os papéis antes de gerar; o Footy Headlines costuma ter fotos de produto boas.
 - Grafismos tonais de baixo contraste (ex.: Palmeiras III) são os mais difíceis de reproduzir no fundo. Use "Gerar outra versão" e escolha a melhor.
 
 ## 9. Próximos passos sugeridos
