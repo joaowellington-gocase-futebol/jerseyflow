@@ -132,6 +132,42 @@ ${regrasMarcas(opcoes, analise)}
 ${PADRAO[modelo]}`;
 }
 
+// ---------- Ajuste pedido pelo designer (réplica de uma versão com uma mudança) ----------
+const pedidoEN = (pedido) => `DESIGNER REQUEST (written in Portuguese — follow it literally; it wins over any rule below):
+"""${pedido}"""`;
+
+export function promptAjuste({ papeisImagens, pedido, opcoes, analise }) {
+  const modelo = opcoes.modelo || 'frente';
+  return `Image 1 is a draft of a Gocase phone-case jersey artwork (model: ${MODELOS_ARTE[modelo].nome}). Make a replica of it with ONLY the change the designer asks for. Keep the exact canvas, framing, composition, colors, texture and everything else identical.
+
+${pedidoEN(pedido)}
+
+Other images (the source of truth for any element the request mentions — text, crest, trims, colors):
+${papeisImagens}
+
+${modelo === 'costas' ? blocoNomeNumero(nomeNumero(opcoes, analise)) : ''}
+${regrasMarcas(opcoes, analise)}
+${PADRAO[modelo]}`;
+}
+
+export function promptAjusteDerivado({ oque, referencia, pedido }) {
+  return `Image 1 is ${oque}. Make a replica of it with ONLY the change the designer asks for. Keep the exact canvas, framing, scale, colors, texture and everything else identical.
+${referencia ? `Image 2 is ${referencia} — use it as reference for shapes, colors and positions.` : ''}
+
+${pedidoEN(pedido)}`;
+}
+
+export function promptAjusteCamada({ camada, chave, pedido }) {
+  return `Image 1 is an isolated layer — ${camada.isolar_en} — on a flat ${chave.nome} background. Image 2 is the full artwork it was cut from (reference for shapes, colors and position).
+Make a replica of Image 1 with ONLY the change the designer asks for. Keep the element in the exact same position and scale, and keep the background a perfectly flat, uniform ${chave.hex} with no texture, gradient, shadow or noise.
+
+${pedidoEN(pedido)}`;
+}
+
+export const blocoPedidoRevisor = (pedido) => `
+Esta versão é um AJUSTE pedido pelo designer: "${pedido}".
+Confira se o pedido foi atendido — se não foi, é problema grave. Quando o pedido contrariar o checklist, o pedido prevalece.`;
+
 /** O que a versão "sem" remove, por modelo. */
 export function alvoRemocao(opcoes, analise) {
   const modelo = opcoes.modelo || 'frente';

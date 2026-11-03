@@ -248,6 +248,19 @@ export async function sobreXadrez(src, largura = 768) {
   return c.toDataURL('image/jpeg', 0.88);
 }
 
+/** Camada transparente sobre a cor de recorte — para a IA editar e o recorte funcionar de novo. */
+export async function sobreCor(src, hex, largura = 1800) {
+  const img = await bitmap(src);
+  const l = Math.min(largura, img.width);
+  const c = novoCanvas(l, Math.round((l / img.width) * img.height));
+  const g = ctx2d(c);
+  g.fillStyle = hex;
+  g.fillRect(0, 0, c.width, c.height);
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(img, 0, 0, c.width, c.height);
+  return c.toDataURL('image/png');
+}
+
 // ---------- ampliação de alta qualidade (lanczos3 via pica) ----------
 let _pica;
 const pica = () => (_pica ||= window.pica({ features: ['js', 'wasm', 'ww'] }));

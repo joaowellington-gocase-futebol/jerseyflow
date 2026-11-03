@@ -123,6 +123,8 @@ Toda versão gerada fica salva. Na aba **Revisões dos agentes** dá para:
   - trocar a versão alternativa ou uma camada só reexporta;
   - trocar a arte principal refaz a versão alternativa e todas as camadas a partir dela (pede confirmação, ~4 min).
 - **Gerar outra versão**: mais uma tentativa, revisada pelos 2 agentes, sem trocar a que está em uso.
+- **Ajustar esta versão**: em qualquer versão (arte, versão alternativa, fundo ou camada), escreva o ajuste em português (ex.: "o nome PALMEIRAS ficou cortado, coloque inteiro acima do escudo"). A IA faz uma **réplica daquela versão só com essa mudança**, usando as referências como fonte. Os 2 agentes revisam e também conferem se o pedido foi atendido. A réplica entra como nova versão, com o pedido no card; para usá-la, clique em **Usar esta versão**.
+  - Código: `ajustarVersao` em `deploy/motor.js`; prompts `promptAjuste`, `promptAjusteDerivado` e `promptAjusteCamada` em `deploy/prompts.js`. Nas camadas, a versão transparente vai sobre a cor de recorte (`sobreCor`) e é recortada de novo.
 
 ### Técnicas de imagem
 

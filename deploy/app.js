@@ -210,6 +210,7 @@ $('#btnGo').onclick = async () => {
 
 // ---------- tarefa ----------
 let aba = 'resultado', flat = false, ocultas = new Set();
+const rascunhos = new Map(), abertos = new Set(); // ajustes sendo escritos, por "etapa:versão"
 const INTERROMPIDA_MS = 4 * 60 * 1000;
 function abrir(id, manterAba = false) {
   history.replaceState(null, '', '#' + id);
@@ -357,10 +358,14 @@ function renderRevisoes(t, st) {
     ${e.tipo === 'analise' ? `<small style="color:var(--muted)">${e.status === 'aprovado' ? 'Uniforme identificado — veja a aba Análise.' : 'Lendo as referências…'}</small>` : ''}
     ${e.tentativas.length ? `<div class="tents">${e.tentativas.map((x) => `<div class="tn ${e.escolhida === x.n ? 'esc' : ''}">
       <div class="tn-h"><span>Versão ${x.n}</span>${badge(x.status)}</div>
+      ${x.pedido ? `<div class="pedido"><small>Ajuste da versão ${x.base}</small>${esc(x.pedido)}</div>` : ''}
       <div class="im ${e.tipo === 'camada' && e.id !== 'camada_fundo' ? 'xadrez' : ''}">${x.imagem ? `<a href="${x.imagem}_full" target="_blank"><img src="${x.imagem}"></a>` : x.erro ? `<span style="color:var(--bad);padding:14px;font-size:12px">${esc(x.erro)}</span>` : '<div class="skel">gerando imagem…</div>'}</div>
       ${escolhivel(e) && x.imagem && x.revisoes ? (e.escolhida === x.n
         ? `<div class="inuse">✓ Em uso · ${e.manual ? 'sua escolha' : 'escolha dos agentes'}</div>`
         : livre ? `<button class="btn usar" data-usar="${e.id}" data-n="${x.n}">Usar esta versão</button>` : '') : ''}
+      ${escolhivel(e) && livre && x.imagem && x.revisoes ? `<details class="ajustar" data-aj="${e.id}:${x.n}" ${abertos.has(`${e.id}:${x.n}`) ? 'open' : ''}><summary>✎ Ajustar esta versão</summary>
+        <textarea placeholder="Ex.: o nome PALMEIRAS ficou cortado — coloque o nome inteiro, centralizado acima do escudo">${esc(rascunhos.get(`${e.id}:${x.n}`) || '')}</textarea>
+        <button class="btn usar" data-ajustar="${e.id}" data-n="${x.n}">Gerar réplica com o ajuste</button></details>` : ''}
       ${(x.revisoes || []).map(renderRev).join('')}
       ${x.status === 'revisando' ? '<div class="rv"><div class="rv-h"><span class="spin"></span><small>2 agentes revisando…</small></div></div>' : ''}</div>`).join('')}</div>` : ''}</div>`).join('');
 }
@@ -469,6 +474,18 @@ function ligar() {
     executarAcao((t) => M.escolherVersao(t, etapa, n), etapa === 'arte' ? 'Refazendo sem escudo e camadas…' : 'Versão escolhida');
   });
   $$('[data-nova]').forEach((b) => b.onclick = () => executarAcao((t) => M.novaVersao(t, b.dataset.nova), 'Gerando outra versão… os agentes vão revisar'));
+  $$('details.ajustar').forEach((d) => {
+    const k = d.dataset.aj, ta = $('textarea', d);
+    d.ontoggle = () => { if (d.open) { abertos.add(k); ta.focus(); } else abertos.delete(k); };
+    ta.oninput = () => rascunhos.set(k, ta.value);
+  });
+  $$('[data-ajustar]').forEach((b) => b.onclick = () => {
+    const etapa = b.dataset.ajustar, n = +b.dataset.n, k = `${etapa}:${n}`;
+    const pedido = (rascunhos.get(k) || '').trim();
+    if (!pedido) return toast('Escreva o ajuste que você quer.');
+    rascunhos.delete(k); abertos.delete(k);
+    executarAcao((t) => M.ajustarVersao(t, etapa, n, pedido), 'Gerando a réplica ajustada… os agentes vão revisar');
+  });
 }
 
 // ---------- histórico ----------

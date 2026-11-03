@@ -126,11 +126,11 @@ export class Tarefa {
   }
 }
 
-async function revisar(revisores, ctx, imagens) {
+async function revisar(revisores, ctx, imagens, pedido) {
   const modelos = [MODELOS.revisor1, MODELOS.revisor2];
   return Promise.all(revisores.map(async (r, i) => {
     try {
-      const v = await chatJSON({ modelo: modelos[i], sistema: P.sistemaRevisor(r.papel, r.foco), texto: r.texto(ctx), imagens });
+      const v = await chatJSON({ modelo: modelos[i], sistema: P.sistemaRevisor(r.papel, r.foco), texto: r.texto(ctx) + (pedido ? P.blocoPedidoRevisor(pedido) : ''), imagens });
       const nota = Number(v.nota);
       return {
         agente: r.papel, modelo: modelos[i], nota: Number.isFinite(nota) ? nota : 0,
@@ -144,14 +144,15 @@ async function revisar(revisores, ctx, imagens) {
   }));
 }
 
-async function tentativa(tarefa, etapa, def, correcoes = [], anteriorN = null) {
+/** pedido: ajuste escrito pelo designer — a versão anteriorN é refeita só com essa mudança. */
+async function tentativa(tarefa, etapa, def, correcoes = [], anteriorN = null, pedido = null) {
   const n = (etapa.tentativas.at(-1)?.n || 0) + 1;
-  const t = { n, status: 'gerando' };
+  const t = { n, status: 'gerando', ...(pedido ? { pedido, base: anteriorN } : {}) };
   etapa.tentativas.push(t);
   tarefa.salvar();
   let res;
   try {
-    res = await def.gerar({ n, correcoes, anterior: anteriorN ? await tarefa.imagem(etapa.id, anteriorN) : null });
+    res = await def.gerar({ n, correcoes, pedido, anterior: anteriorN ? await tarefa.imagem(etapa.id, anteriorN) : null });
     t.imagem = await tarefa.salvarVersao(`${etapa.id}_t${n}`, res.png, def.transparente);
   } catch (e) {
     if (e.fatal && /sessão/.test(e.message)) throw e;
@@ -160,7 +161,7 @@ async function tentativa(tarefa, etapa, def, correcoes = [], anteriorN = null) {
   }
   t.status = 'revisando';
   tarefa.salvar();
-  const revs = await revisar(def.revisores, def.ctx, res.revisaoImgs);
+  const revs = await revisar(def.revisores, def.ctx, res.revisaoImgs, pedido);
   const validas = revs.filter((r) => r.nota !== null);
   t.revisoes = revs;
   t.media = validas.length ? +(validas.reduce((s, r) => s + r.nota, 0) / validas.length).toFixed(1) : null;
@@ -227,10 +228,15 @@ async function definicao(tarefa, ctx, etapaId) {
     return {
       revisores: P.revisoresArte(opcoes.modelo || 'frente'),
       ctx: { opcoes, nn: P.nomeNumero(opcoes, analise), papeis: listaPT([...ctx.refsPT, ...ctx.estilosURI.map(() => ctx.estiloPT), 'ARTE CANDIDATA']) },
-      gerar: async ({ correcoes, anterior }) => {
+      gerar: async ({ correcoes, anterior, pedido }) => {
         let bruto;
-        if (anterior && correcoes.length) {
-          const extras = [...ctx.refsEN, ...ctx.estilosURI.slice(0, 1).map(() => ctx.estiloEN)];
+        const extras = [...ctx.refsEN, ...ctx.estilosURI.slice(0, 1).map(() => ctx.estiloEN)];
+        if (anterior && pedido) {
+          bruto = await editarImagem({
+            prompt: P.promptAjuste({ papeisImagens: listaEN(extras, 2), pedido, opcoes, analise }),
+            imagens: [await I.dataURI(anterior, 1800, 'png'), ...ctx.refsURI, ...ctx.estilosURI.slice(0, 1)],
+          });
+        } else if (anterior && correcoes.length) {
           bruto = await editarImagem({
             prompt: P.promptCorrecao({ papeisImagens: listaEN(extras, 2), correcoes, opcoes, analise }),
             imagens: [await I.dataURI(anterior, 1800, 'png'), ...ctx.refsURI, ...ctx.estilosURI.slice(0, 1)],
@@ -259,8 +265,10 @@ async function definicao(tarefa, ctx, etapaId) {
     const alvo = P.alvoRemocao(opcoes, analise);
     return {
       revisores: P.revisoresRemocao(alvo), ctx: {},
-      gerar: async ({ correcoes }) => {
-        const png = await I.normalizar(await editarImagem({ prompt: P.promptRemover({ alvo, opcoes, correcoes }), imagens: [arteURI] }));
+      gerar: async ({ correcoes, anterior, pedido }) => {
+        const png = await I.normalizar(await editarImagem(anterior && pedido
+          ? { prompt: P.promptAjusteDerivado({ oque: `a jersey artwork with ${alvo.en} removed`, referencia: 'the original full artwork', pedido }), imagens: [await I.dataURI(anterior, 1800, 'png'), arteURI] }
+          : { prompt: P.promptRemover({ alvo, opcoes, correcoes }), imagens: [arteURI] }));
         return { png, revisaoImgs: [arteRev, await I.dataURI(png, 1024)] };
       },
     };
@@ -272,8 +280,10 @@ async function definicao(tarefa, ctx, etapaId) {
     const removidos = analise.camadas.map((c) => c.isolar_en);
     return {
       revisores: P.REVISORES.fundo, ctx: {},
-      gerar: async ({ correcoes }) => {
-        const png = await I.normalizar(await editarImagem({ prompt: P.promptFundo({ removidos, correcoes }), imagens: [semURI] }));
+      gerar: async ({ correcoes, anterior, pedido }) => {
+        const png = await I.normalizar(await editarImagem(anterior && pedido
+          ? { prompt: P.promptAjusteDerivado({ oque: 'the plain BACKGROUND layer of a jersey artwork (only the body pattern and fabric, no crest, collar, trims, names or numbers)', referencia: 'the artwork it comes from', pedido }), imagens: [await I.dataURI(anterior, 1800, 'png'), semURI] }
+          : { prompt: P.promptFundo({ removidos, correcoes }), imagens: [semURI] }));
         return { png, revisaoImgs: [semRev, await I.dataURI(png, 1024)] };
       },
     };
@@ -285,8 +295,10 @@ async function definicao(tarefa, ctx, etapaId) {
   const outras = analise.camadas.filter((c) => c.id !== camada.id).map((c) => c.isolar_en);
   return {
     revisores: P.REVISORES.camada, ctx: { camada }, transparente: true,
-    gerar: async ({ correcoes }) => {
-      const png = await I.recortarChroma(await editarImagem({ prompt: P.promptIsolar({ camada, outras, chave, correcoes }), imagens: [arteURI] }), chave);
+    gerar: async ({ correcoes, anterior, pedido }) => {
+      const png = await I.recortarChroma(await editarImagem(anterior && pedido
+        ? { prompt: P.promptAjusteCamada({ camada, chave, pedido }), imagens: [await I.sobreCor(anterior, chave.hex), arteURI] }
+        : { prompt: P.promptIsolar({ camada, outras, chave, correcoes }), imagens: [arteURI] }), chave);
       const { cobertura } = await I.infoAlfa(png);
       if (cobertura < 0.001) throw new Error('camada saiu vazia');
       return { png, revisaoImgs: [arteRev, await I.sobreXadrez(png, 768)] };
@@ -531,6 +543,21 @@ export async function novaVersao(tarefa, etapaId) {
   if (!etapa || !['arte', 'camada'].includes(etapa.tipo)) throw new Error('Etapa inválida.');
   return comStatus(tarefa, `Gerando outra versão de "${etapa.titulo}"`, async () => {
     const t = await tentativa(tarefa, etapa, await definicao(tarefa, await contexto(tarefa), etapaId));
+    if (t.status === 'erro') throw new Error(t.erro);
+  });
+}
+
+/** Réplica de uma versão com o ajuste escrito pelo designer; os 2 agentes revisam (inclusive se o pedido foi atendido). */
+export async function ajustarVersao(tarefa, etapaId, n, pedido) {
+  liberada(tarefa);
+  pedido = String(pedido || '').trim().slice(0, 1500);
+  if (!pedido) throw new Error('Escreva o ajuste que você quer.');
+  const etapa = tarefa.estado.etapas.find((e) => e.id === etapaId);
+  if (!etapa || !['arte', 'camada'].includes(etapa.tipo)) throw new Error('Etapa inválida.');
+  if (!etapa.tentativas.find((x) => x.n === n)?.imagem) throw new Error('Versão não encontrada.');
+  return comStatus(tarefa, `Ajustando a versão ${n} de "${etapa.titulo}"`, async () => {
+    tarefa.log(`Ajuste pedido na versão ${n} de "${etapa.titulo}": ${pedido}`);
+    const t = await tentativa(tarefa, etapa, await definicao(tarefa, await contexto(tarefa), etapaId), [], n, pedido);
     if (t.status === 'erro') throw new Error(t.erro);
   });
 }
